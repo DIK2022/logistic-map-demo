@@ -1,18 +1,38 @@
+#logistic_map_demo.py
+
+import os
 import sys
+import tempfile
+import openpyxl
 import numpy as np
 import pyqtgraph as pg
+import polars as pl
+import pandas as pd
+
+from openpyxl.drawing.image import Image
+from pyqtgraph.exporters import ImageExporter
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QSlider, QLabel
+    QHBoxLayout, QSlider, QLabel, QPushButton, QFileDialog,
+    QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPixmap, QGuiApplication, QAction
+
 
 class LogisticMapDemo(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Демонстрация теории хаоса: логистическое отображение")
-        self.setGeometry(100, 100, 1200, 600)
+        self.setGeometry(100, 100, 1400, 700)
 
+        # Данные для хранения истории
+        self.history_r = []
+        self.history_x = []
+        self.current_r = 3.2
+        self.all_iterations = []  # для экспорта всех данных
+        
         # Центральный виджет
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -23,8 +43,8 @@ class LogisticMapDemo(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
 
         # График 1: итерационная диаграмма
-        self.plot_iter = pg.PlotWidget(title="Итерации (xₙ от n)")
-        self.plot_iter.setLabel('left', 'xₙ')
+        self.plot_iter = pg.PlotWidget(title="Итерации (xn от n)")
+        self.plot_iter.setLabel('left', 'xn')
         self.plot_iter.setLabel('bottom', 'Номер итерации')
         self.plot_iter.setXRange(0, 200)
         self.plot_iter.setYRange(0, 1)
@@ -60,6 +80,19 @@ class LogisticMapDemo(QMainWindow):
         self.label_lyap = QLabel("Показатель Ляпунова: вычисляется...")
         self.label_lyap.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(self.label_lyap)
+        
+        # Кнопки экспорта
+        self.btn_export_png = QPushButton("📸 Экспорт графиков в PNG")
+        self.btn_export_png.clicked.connect(self.export_graphs_png)
+        right_layout.addWidget(self.btn_export_png)
+        
+        self.btn_export_excel = QPushButton("📊 Экспорт данных в Excel")
+        self.btn_export_excel.clicked.connect(self.export_data_excel)
+        right_layout.addWidget(self.btn_export_excel)
+        
+        self.btn_export_all = QPushButton("📈 Экспорт графиков в Excel")
+        self.btn_export_all.clicked.connect(self.export_graphs_to_excel)
+        right_layout.addWidget(self.btn_export_all)
 
         right_layout.addStretch()
         main_layout.addWidget(right_panel, stretch=1)
@@ -69,16 +102,32 @@ class LogisticMapDemo(QMainWindow):
         self.bifur_x = []   # соответствующие x после переходного процесса
         self.bifur_scatter = pg.ScatterPlotItem(size=2, brush='w')
         self.plot_bifur.addItem(self.bifur_scatter)
+        
+        # Меню
+        self.create_menu()
 
         # Начальное построение
         self.update_plots()
 
+    def create_menu(self):
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("Файл")
+        
+        export_png_action = QAction("Экспорт графиков в PNG", self)
+        export_png_action.triggered.connect(self.export_graphs_png)
+        file_menu.addAction(export_png_action)
+        
+        export_excel_action = QAction("Экспорт данных в Excel", self)
+        export_excel_action.triggered.connect(self.export_data_excel)
+        file_menu.addAction(export_excel_action)        
+    
     def on_slider_change(self):
         self.update_plots()
 
     def update_plots(self):
         # Получаем текущее r (слайдер выдаёт значения от 250 до 400 -> делим на 100)
         r = self.slider.value() / 100.0
+        self.current_r = r
         self.label_r.setText(f"r = {r:.3f}")
 
         # --- Итерационная диаграмма ---
@@ -88,6 +137,9 @@ class LogisticMapDemo(QMainWindow):
         x[0] = x0
         for i in range(1, n_iter):
             x[i] = r * x[i-1] * (1 - x[i-1])
+            
+        # Сохраняем для экспорта
+        self.all_iterations = x.tolist()
 
         # Отображаем последние 200 итераций
         self.plot_iter.clear()
@@ -103,6 +155,8 @@ class LogisticMapDemo(QMainWindow):
         for val in stable_x[::2]:   # берём каждую вторую для наглядности
             self.bifur_r.append(r)
             self.bifur_x.append(val)
+            self.history_r.append(r)
+            self.history_x.append(val)
 
         # Обновляем scatter-график
         self.bifur_scatter.setData(self.bifur_r, self.bifur_x)
@@ -126,6 +180,117 @@ class LogisticMapDemo(QMainWindow):
             if df > 0:
                 sum_ln += np.log(df)
         return sum_ln / n
+    
+    def export_graphs_png(self):
+        """Экспорт графиков в PNG"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить графики", "", "PNG Files (*.png)"
+        )
+        if file_path:
+            try:
+                # Экспорт первого графика
+                exporter1 = ImageExporter(self.plot_iter.plotItem)
+                exporter1.parameters()['width'] = 800
+                base_path = file_path.rsplit('.', 1)[0]
+                exporter1.export(f'{base_path}_iter.png')
+                
+                # Экспорт второго графика
+                exporter2 = ImageExporter(self.plot_bifur.plotItem)
+                exporter2.parameters()['width'] = 800
+                exporter2.export(f'{base_path}_bifur.png')
+                
+                self.statusBar().showMessage(f"Графики сохранены: {base_path}_iter.png и {base_path}_bifur.png")
+            except Exception as e:
+                self.statusBar().showMessage(f"Ошибка экспорта: {str(e)}")
+            
+    def export_data_excel(self):
+        """Экспорт данных в Excel с использованием pandas"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить данные", "", "Excel Files (*.xlsx)"
+        )
+        if file_path:
+            # Исправлено: self.all_iterations (было self, all_iterations)
+            df_iterations = pd.DataFrame({
+                "iteration": list(range(len(self.all_iterations))),
+                "x_value": self.all_iterations,
+                "r_parameter": [self.current_r] * len(self.all_iterations)
+            })
+            
+            # Создаем данные для бифуркационной диаграммы
+            df_bifur = pd.DataFrame({
+                "r_parameter": self.history_r[-1000:] if len(self.history_r) > 1000 else self.history_r,
+                "x_value": self.history_x[-1000:] if len(self.history_x) > 1000 else self.history_x
+            })
+            
+            # Экспортируем в Excel
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df_iterations.to_excel(writer, sheet_name='Итерации', index=False)
+                df_bifur.to_excel(writer, sheet_name='Бифуркация', index=False)
+            
+            self.statusBar().showMessage(f"Данные сохранены: {file_path}") 
+            
+    def export_graphs_to_excel(self):
+        """Экспорт графиков в Excel как встроенные изображения"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить графики в Excel", "", "Excel Files (*.xlsx)"
+        )
+        if file_path:
+            # Создаем временные файлы для графиков
+            with tempfile.NamedTemporaryFile(suffix='_iter.png', delete=False) as tmp_iter:
+                iter_path = tmp_iter.name
+            with tempfile.NamedTemporaryFile(suffix='_bifur.png', delete=False) as tmp_bifur:
+                bifur_path = tmp_bifur.name
+            
+            # Экспортируем графики во временные файлы
+            exporter1 = pg.exporters.ImageExporter(self.plot_iter.plotItem)
+            exporter1.parameters()['width'] = 800
+            exporter1.export(iter_path)
+            
+            exporter2 = pg.exporters.ImageExporter(self.plot_bifur.plotItem)
+            exporter2.parameters()['width'] = 800
+            exporter2.export(bifur_path)
+            
+            # Создаем Excel файл с графиками
+            wb = openpyxl.Workbook()
+            
+            # Лист с итерационным графиком
+            ws1 = wb.active
+            ws1.title = "Итерационный график"
+            img1 = Image(iter_path)
+            img1.width = 600
+            img1.height = 400
+            ws1.add_image(img1, 'A1')
+            
+            # Лист с бифуркационной диаграммой
+            ws2 = wb.create_sheet("Бифуркация")
+            img2 = Image(bifur_path)
+            img2.width = 600
+            img2.height = 400
+            ws2.add_image(img2, 'A1')
+            
+            # Лист с данными (используем polars)
+            ws3 = wb.create_sheet("Данные")
+            
+            # Добавляем данные с помощью polars
+            df_data = pl.DataFrame({
+                "r_parameter": [self.current_r] * 10,
+                "x_sample": self.all_iterations[:10] if self.all_iterations else []
+            })
+            
+            # Конвертируем в список для записи в Excel
+            data_rows = df_data.rows()
+            for i, row in enumerate(data_rows, start=1):
+                for j, value in enumerate(row, start=1):
+                    ws3.cell(row=i, column=j, value=value)
+            
+            # Сохраняем Excel файл
+            wb.save(file_path)
+            
+            # Удаляем временные файлы
+            os.unlink(iter_path)
+            os.unlink(bifur_path)
+            
+            self.statusBar().showMessage(f"Графики и данные сохранены в Excel: {file_path}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
