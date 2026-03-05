@@ -32,6 +32,22 @@
 ## Установка и запуск
 
 1. Клонируйте репозиторий:
-   ```bash
+```bash
    git clone https://github.com/yourusername/logistic-map-demo.git
    cd logistic-map-demo
+```
+
+2. Создайте виртуальное окружение (рекомендуется) и активируйте его:
+```bash
+   python -m venv venv
+   source venv/bin/activate  # для Linux/Mac
+   venv\Scripts\activate     # для Windows
+```
+3. Установите зависимости:
+```bash
+   pip install -r requirements.txt
+```
+4. Запустите приложение:
+```bash
+   python main.py
+```
