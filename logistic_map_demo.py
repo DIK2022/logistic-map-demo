@@ -209,7 +209,7 @@ class LogisticMapDemo(QMainWindow):
             self, "Сохранить данные", "", "Excel Files (*.xlsx)"
         )
         if file_path:
-            # Исправлено: self.all_iterations (было self, all_iterations)
+            # Исправлено: pd.DataFrame (было pdDataFrame)
             df_iterations = pd.DataFrame({
                 "iteration": list(range(len(self.all_iterations))),
                 "x_value": self.all_iterations,
