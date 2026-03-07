@@ -15,10 +15,10 @@ from pyqtgraph.exporters import ImageExporter
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QSlider, QLabel, QPushButton, QFileDialog,
-    QMessageBox
+    QMessageBox, QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QGuiApplication, QAction
+from PyQt6.QtGui import QPixmap, QGuiApplication, QAction, QDoubleValidator
 
 
 class LogisticMapDemo(QMainWindow):
@@ -27,6 +27,12 @@ class LogisticMapDemo(QMainWindow):
         self.setWindowTitle("Демонстрация теории хаоса: логистическое отображение")
         self.setGeometry(100, 100, 1400, 700)
 
+        self.animating = False
+        self.animation_direction = 1  # 1 - увеличение r, -1 - уменьшение
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.animation_step)
+        self.current_x0 = 0.5  # начальное условие
+        
         # Данные для хранения истории
         self.history_r = []
         self.history_x = []
@@ -63,6 +69,31 @@ class LogisticMapDemo(QMainWindow):
         # Правая панель с управлением
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        
+        # --- Блок ввода начального условия ---
+        self.label_x0 = QLabel("Начальное значение x₀:")
+        self.label_x0.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.label_x0)
+        
+        self.x0_input = QLineEdit("0.5")
+        self.x0_input.setValidator(QDoubleValidator(0.01, 0.99, 3))  # от 0.01 до 0.99
+        self.x0_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.x0_input.textChanged.connect(self.on_x0_changed)
+        right_layout.addWidget(self.x0_input)
+
+        # --- Блок управления анимацией ---
+        self.btn_animate = QPushButton("▶ Запустить анимацию")
+        self.btn_animate.clicked.connect(self.toggle_animation)
+        right_layout.addWidget(self.btn_animate)
+
+        self.animation_speed = QSlider(Qt.Orientation.Horizontal)
+        self.animation_speed.setMinimum(1)
+        self.animation_speed.setMaximum(20)
+        self.animation_speed.setValue(10)
+        self.animation_speed.setTickInterval(5)
+        self.animation_speed.setToolTip("Скорость анимации")
+        right_layout.addWidget(QLabel("Скорость:"))
+        right_layout.addWidget(self.animation_speed)
 
         self.label_r = QLabel("r = 3.200")
         self.label_r.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -108,7 +139,25 @@ class LogisticMapDemo(QMainWindow):
 
         # Начальное построение
         self.update_plots()
+        
+        self.animation_speed.valueChanged.connect(self.update_animation_speed)
+        
+    def update_animation_speed(self, value):
+        if self.animating:
+            self.timer.setInterval(int(100 / value))
 
+    def on_x0_changed(self, text):
+        """Обработчик изменения x₀"""
+        try:
+            x0 = float(text)
+            if 0 < x0 < 1:
+                self.current_x0 = x0
+                self.update_plots()  # пересчитать с новым x0
+            else:
+                self.statusBar().showMessage("x₀ должно быть между 0 и 1")
+        except ValueError:
+            pass  # игнорируем нечисловой ввод
+        
     def create_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("Файл")
@@ -132,7 +181,7 @@ class LogisticMapDemo(QMainWindow):
 
         # --- Итерационная диаграмма ---
         n_iter = 500   # общее число итераций
-        x0 = 0.5       # начальное условие
+        x0 = self.current_x0       # начальное условие
         x = np.zeros(n_iter)
         x[0] = x0
         for i in range(1, n_iter):
@@ -291,6 +340,36 @@ class LogisticMapDemo(QMainWindow):
             os.unlink(bifur_path)
             
             self.statusBar().showMessage(f"Графики и данные сохранены в Excel: {file_path}")
+            
+    def toggle_animation(self):
+        """Запуск/остановка анимации"""
+        if self.animating:
+            self.timer.stop()
+            self.btn_animate.setText("▶ Запустить анимацию")
+            self.animating = False
+        else:
+            interval = int(100 / self.animation_speed.value()) # чем выше скорсть, тем меньше интервал
+            self.timer.start(interval)
+            self.btn_animate.setText("⏸ Пауза")
+            self.animating = True
+            
+    def animation_step(self):
+        """Шаг анимации: измерение r"""
+        current_r = self.slider.value() / 100
+        step = 0.01 * self.animation_direction 
+        
+        new_r = current_r + step
+        
+        # Границы изменения r
+        if new_r > 4.0:
+            new_r = 4.0
+            self.animation_direction = -1 # меняем направление
+        elif new_r < 2.5:
+            new_r = 2.5
+            self.animation_direction = 1
+            
+        self.slider.setValue(int(new_r * 100))
+        
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
